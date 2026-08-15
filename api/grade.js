@@ -1,4 +1,4 @@
-import { getSession } from "./_lib/auth.js";
+import { getSession } from "../lib/auth.js";
 
 // Every place in the frontend that used to call api.anthropic.com directly
 // from the browser (LessonEngine's graded-write, the flash-forward scene)

@@ -1,5 +1,5 @@
-import { prisma } from "./_lib/db.js";
-import { resolveAuthorizedStudentId } from "./_lib/access.js";
+import { prisma } from "../lib/db.js";
+import { resolveAuthorizedStudentId } from "../lib/access.js";
 
 export default async function handler(req, res) {
   const studentId = await resolveAuthorizedStudentId(req, res);
