@@ -236,6 +236,3 @@ Being upfront about the current state:
 ## License
 
 MIT, see LICENSE.
-# legecy-lab-academy
-# legecy-lab-academy
-# legecy-lab-academy
