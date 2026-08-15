@@ -1,0 +1,208 @@
+// Postgres-backed schema. Works with Vercel Postgres, Supabase, Neon, or
+// any Postgres connection string in DATABASE_URL. No vendor lock-in.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  roles        String   // comma-separated: "student,parent,coach" (kept simple, not a separate table)
+  createdAt    DateTime @default(now())
+
+  student            Student?
+  parentLinks        ParentStudentLink[] @relation("ParentLinks")
+  coachLinks         CoachStudentLink[]  @relation("CoachLinks")
+}
+
+model Student {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  user       User     @relation(fields: [userId], references: [id])
+  gradeLevel Int?
+  houseName  String   @default("House Purpose")
+  createdAt  DateTime @default(now())
+
+  completions       LessonCompletion[]
+  portfolioItems     PortfolioArtifact[]
+  stakesLedger        StakesLedgerEntry[]
+  mission1Answer      Mission1Answer?
+  parentLinks        ParentStudentLink[]
+  coachLinks         CoachStudentLink[]
+  athleteTasks        AthleteTask[]
+  athleteGoals        AthleteGoal[]
+  athleteStatus       AthleteStatus?
+  athleteReflections  AthleteReflection[]
+  mentalToughness     MentalToughnessProgress?
+  athleteConfig       AthleteConfig?
+  athleteFilmNotes    AthleteFilmNotes?
+}
+
+// A parent can have multiple children, and a student can have more than one
+// linked guardian, so this is many-to-many, not a single foreign key.
+model ParentStudentLink {
+  id           String  @id @default(cuid())
+  parentUserId String
+  parentUser   User    @relation("ParentLinks", fields: [parentUserId], references: [id])
+  studentId    String
+  student      Student @relation(fields: [studentId], references: [id])
+
+  @@unique([parentUserId, studentId])
+}
+
+// A coach's roster, same many-to-many shape as the parent link, since one
+// coach can have many students and (less commonly) a student could have
+// more than one coach across different programs.
+model CoachStudentLink {
+  id          String  @id @default(cuid())
+  coachUserId String
+  coachUser   User    @relation("CoachLinks", fields: [coachUserId], references: [id])
+  studentId   String
+  student     Student @relation(fields: [studentId], references: [id])
+
+  @@unique([coachUserId, studentId])
+}
+
+model LessonCompletion {
+  id          String   @id @default(cuid())
+  studentId   String
+  student     Student  @relation(fields: [studentId], references: [id])
+  specKey     String
+  completedAt DateTime @default(now())
+
+  @@unique([studentId, specKey])
+}
+
+model PortfolioArtifact {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id])
+  courseId  String
+  course    String
+  unit      String
+  lessonKey String
+  title     String
+  skill     String
+  section   String
+  score     Int?
+  maxScore  Int?
+  mastered  Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+// A ledger, not a single mutable row, on purpose: every award is its own
+// entry, so a student's current total is a sum, not an overwritable number.
+// That makes "why did my points change" answerable later, and makes the
+// data harder to silently corrupt with a bad write.
+model StakesLedgerEntry {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id])
+  xpDelta   Int      @default(0)
+  houseDelta Int     @default(0)
+  reason    String?
+  createdAt DateTime @default(now())
+}
+
+model Mission1Answer {
+  id             String   @id @default(cuid())
+  studentId      String   @unique
+  student        Student  @relation(fields: [studentId], references: [id])
+  selectedValues String   // JSON-encoded array
+  justification  String
+  updatedAt      DateTime @updatedAt
+}
+
+// ─── Athlete Development ────────────────────────────────────────────────
+// Tasks and goals are real rows now, not a shared in-memory blob. A student
+// can add/edit/complete their own; nothing here is shared across students.
+model AthleteTask {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id])
+  title     String
+  cat       String
+  priority  String  @default("medium")
+  time      String  @default("")
+  done      Boolean @default(false)
+  pts       Int     @default(0)
+  createdAt DateTime @default(now())
+}
+
+model AthleteGoal {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id])
+  title     String
+  cat       String
+  deadline  String   @default("")
+  progress  Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+// Current clock-in status, one row per student, mutable on purpose (it's a
+// live status, not a history). Reflections below it are the actual ledger.
+model AthleteStatus {
+  studentId String   @id
+  student   Student  @relation(fields: [studentId], references: [id])
+  sport     String?
+  clockedIn Boolean  @default(false)
+  clockTime DateTime?
+  updatedAt DateTime @updatedAt
+}
+
+model AthleteReflection {
+  id         String   @id @default(cuid())
+  studentId  String
+  student    Student  @relation(fields: [studentId], references: [id])
+  reflection String
+  pct        Int
+  createdAt  DateTime @default(now())
+}
+
+// ─── Mental Toughness ────────────────────────────────────────────────────
+// One row per student. The 30-day program's per-day entries are kept as
+// JSON-encoded maps (day index to entry) rather than one row per day,
+// since they're always read and written as a whole set together.
+model MentalToughnessProgress {
+  studentId         String   @id
+  student           Student  @relation(fields: [studentId], references: [id])
+  currentDay        Int      @default(0)
+  completedDays     String   @default("{}") // JSON object: { "0": true, "1": true, ... }
+  journalEntries    String   @default("{}") // JSON: { "0": "text", ... }
+  goalEntries       String   @default("{}")
+  confidenceRatings String   @default("{}")
+  updatedAt         DateTime @updatedAt
+}
+
+// App-level settings, one row per student. Simple key-value config, not a
+// family-wide account like the original demo (the family/multi-athlete
+// roster it used to attach to doesn't map onto the real per-student auth
+// model, that reconciliation is still open, see README).
+model AthleteConfig {
+  studentId    String  @id
+  student      Student @relation(fields: [studentId], references: [id])
+  familyName   String  @default("My Family")
+  rewardPer    Int     @default(5)
+  adhdMode     Boolean @default(true)
+  allowYouTube Boolean @default(true)
+  allowUpload  Boolean @default(true)
+}
+
+// A student's written breakdown of each film, keyed by film id in a JSON
+// blob (same pattern as Mental Toughness's per-day entries), since these
+// are always read and written together as one set, not queried individually.
+model AthleteFilmNotes {
+  studentId String   @id
+  student   Student  @relation(fields: [studentId], references: [id])
+  notes     String   @default("{}") // JSON: { "filmId": "breakdown text", ... }
+  updatedAt DateTime @updatedAt
+}
